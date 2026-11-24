@@ -27,6 +27,8 @@ services:
     environment:
       - URL_INFERENCIA=http://inferencia:8001
       - JWT_SEGREDO=${JWT_SEGREDO:-troque-este-segredo}
+      - USUARIO_API=${USUARIO_API:-admin}
+      - SENHA_API=${SENHA_API:-admin}
     depends_on: [inferencia]
 
 # Observe: os servicos se referenciam pelo NOME (inferencia, redis),
