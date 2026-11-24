@@ -130,6 +130,20 @@ def predict(entrada: Entrada, usuario: str = Depends(limite_por_usuario)):
                             detail=f"servico de inferencia indisponivel: {e}")
 
 
+@app.get("/resultado/{tarefa_id}")
+def resultado(tarefa_id: str, usuario: str = Depends(limite_por_usuario)):
+    """Consulta o resultado de uma tarefa enfileirada pelo /predict."""
+    try:
+        r = requests.get(f"{URL_INFERENCIA}/resultado/{tarefa_id}", timeout=10)
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="tarefa nao encontrada")
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=503,
+                            detail=f"servico de inferencia indisponivel: {e}")
+
+
 @app.post("/login", dependencies=[Depends(limite_por_ip)])
 def login(dados: Login):
     ok_user = hmac.compare_digest(dados.usuario.encode(), USUARIO_API.encode())
