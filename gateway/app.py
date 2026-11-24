@@ -9,7 +9,9 @@ Rodar: uvicorn app:app --port 8000
 """
 import hmac
 import os
+import threading
 import time
+from collections import defaultdict, deque
 
 import jwt
 import requests
@@ -25,6 +27,7 @@ JWT_ALGORITMO = "HS256"
 JWT_EXPIRA_MINUTOS = int(os.getenv("JWT_EXPIRA_MINUTOS", "30"))
 USUARIO_API = os.getenv("USUARIO_API", "admin")
 SENHA_API = os.getenv("SENHA_API", "admin")
+LIMITE_POR_MINUTO = int(os.getenv("LIMITE_POR_MINUTO", "30"))
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -63,6 +66,42 @@ def usuario_autenticado(
     return payload["sub"]
 
 
+# --- TAREFA 2: rate limit (janela deslizante de 60s por cliente) -----------
+
+_acessos: dict[str, deque] = defaultdict(deque)
+_trava = threading.Lock()
+
+
+def permitir(cliente: str) -> tuple[bool, int]:
+    """Retorna (permitido, segundos ate liberar)."""
+    agora = time.monotonic()
+    with _trava:
+        fila = _acessos[cliente]
+        while fila and agora - fila[0] >= 60:
+            fila.popleft()
+        if len(fila) >= LIMITE_POR_MINUTO:
+            return False, int(60 - (agora - fila[0])) + 1
+        fila.append(agora)
+        return True, 0
+
+
+def limitar(cliente: str):
+    ok, espera = permitir(cliente)
+    if not ok:
+        raise HTTPException(status_code=429,
+                            detail="limite de requisicoes excedido",
+                            headers={"Retry-After": str(espera)})
+
+
+def limite_por_usuario(usuario: str = Depends(usuario_autenticado)) -> str:
+    limitar(f"user:{usuario}")
+    return usuario
+
+
+def limite_por_ip(request: Request):
+    limitar(f"ip:{request.client.host if request.client else 'desconhecido'}")
+
+
 @app.middleware("http")
 async def registrar(request: Request, call_next):
     inicio = time.time()
@@ -79,8 +118,8 @@ def saude():
 
 
 @app.post("/predict")
-def predict(entrada: Entrada, usuario: str = Depends(usuario_autenticado)):
-    # JWT validado via dependencia (401 se ausente/invalido).
+def predict(entrada: Entrada, usuario: str = Depends(limite_por_usuario)):
+    # JWT validado e limite por cliente aplicados via dependencias.
     try:
         r = requests.post(f"{URL_INFERENCIA}/predict",
                           json=entrada.model_dump(), timeout=10)
@@ -91,7 +130,7 @@ def predict(entrada: Entrada, usuario: str = Depends(usuario_autenticado)):
                             detail=f"servico de inferencia indisponivel: {e}")
 
 
-@app.post("/login")
+@app.post("/login", dependencies=[Depends(limite_por_ip)])
 def login(dados: Login):
     ok_user = hmac.compare_digest(dados.usuario.encode(), USUARIO_API.encode())
     ok_pass = hmac.compare_digest(dados.senha.encode(), SENHA_API.encode())
