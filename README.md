@@ -1,118 +1,176 @@
-# Kit de Partida — C3.A2: Plataforma de IA como Serviço (projeto integrador)
+# C3.A2 — Plataforma de IA como Serviço
 
-**Sistemas Distribuídos e Computação em Nuvem · FAESA · 2026/2**
-Prof. Howard Cruz Roatti · Lançado na Aula 13 (05/11) · Entrega na Aula 17 (26/11)
+Sistemas Distribuídos e Computação em Nuvem · FAESA · 2026/2 · Turma 8HC1
 
----
+## Integrantes
 
-## O que é isto
+- Arthur Coutinho Chagas
+- Enzo Sampaio Lopes Herzog de Azeredo
+- Luan Gonçalves dos Santos
+- Lucas Machado de Magalhães
+- Vinícius de Souza Silva
 
-O projeto que fecha o semestre. Você pega tudo o que construiu e transforma numa
-plataforma de verdade: **conteinerizada, publicada na internet, observável e protegida**.
-Ao final você terá um sistema distribuído completo e público — material de portfólio
-para entrevista de emprego.
+## Deploy público
 
-> **Sobre a IA neste trabalho:** todo contato com inteligência artificial aqui é
-> **chamada de biblioteca ou de API**. Você **não vai treinar modelos** nem precisar de
-> matemática de aprendizado de máquina. O modelo já vem pronto e configurado.
-> A sua nota vem da **engenharia distribuída**: arquitetura, comunicação, resiliência e
-> execução reproduzível — a sofisticação do modelo **não pontua**.
+**URL pública (HTTPS):** `PREENCHER-APOS-O-DEPLOY` · passo a passo em [deploy/INSTRUCOES.md](deploy/INSTRUCOES.md)
 
----
+## O que é
 
-## Como começar
+Plataforma que recebe um texto e devolve uma classificação de sentimento. A IA é só a
+carga de trabalho: o foco é a engenharia distribuída — **microsserviços
+conteinerizados, orquestrados por um único `docker-compose`, com autenticação,
+resiliência, observabilidade e deploy público com HTTPS.**
 
-```bash
-# 1. Clone o kit e entre na pasta
-git clone https://github.com/howardroatti/sd-2026-2-kit-c3a2.git
-cd sd-2026-2-kit-c3a2
+## Arquitetura
 
-# 2. Crie e ative o ambiente virtual
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-source .venv/bin/activate
+```mermaid
+flowchart LR
+    C([Cliente]) -- "HTTPS" --> CD[Caddy<br/>HTTPS automático]
+    CD --> GW
 
-# 3. Instale as dependências
-pip install -r requirements.txt
+    subgraph Plataforma [docker compose]
+        GW["API Gateway :8000<br/>JWT · rate limit<br/>timeout · retry · circuit breaker"]
+        INF["Inferência :8001<br/>REST + modelo"]
+        R[(Redis<br/>fila + resultados)]
+        W["Worker<br/>retry + dead-letter"]
+        OC[OpenTelemetry<br/>Collector]
+    end
+
+    GW -- "REST" --> INF
+    INF -- "RPUSH tarefa" --> R
+    R -- "BLPOP" --> W
+    W -- "grava resultado" --> R
+    INF -- "lê resultado" --> R
+    GW -. "spans OTLP" .-> OC
+    INF -. "spans OTLP" .-> OC
+    W -. "spans OTLP" .-> OC
 ```
 
-```bash
-# 4. Copie o arquivo de ambiente
-cp .env.example .env
-
-# 5. Suba a stack inteira com UM comando
-docker compose up --build
-
-# 6. Teste pelo gateway (nunca pelos serviços diretamente)
-curl http://localhost:8000/saude
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" -d '{"texto":"servico excelente"}'
-
-# 7. Publique na nuvem seguindo deploy/INSTRUCOES.md
-```
-
----
-
-## Estrutura do projeto
-
-```
-sd-2026-2-kit-c3a2/
-├── gateway/
-│   ├── app.py              # TAREFAS 1 e 2 (JWT e rate limit)
-│   └── Dockerfile          # PRONTO - use de modelo
-├── inferencia/             # traga o seu C1.A2 para cá
-├── worker/                 # traga o seu worker para cá
-├── deploy/INSTRUCOES.md    # passo a passo do free tier
-├── Dockerfile.exemplo      # modelo para os demais serviços
-├── docker-compose.yml      # TAREFA 4
-└── TAREFAS.md              # <- comece por aqui
-```
-
----
-
-## O que você precisa fazer
-
-Abra o arquivo **`TAREFAS.md`**: ele lista o núcleo obrigatório item a item, indicando
-o arquivo e a aula de referência de cada um.
-
----
-
-## Como você será avaliado
-
-| Critério | Pontos |
+| Serviço | Responsabilidade |
 |---|---|
-| Arquitetura e decomposição em serviços | 1,5 |
-| Comunicação funcionando (REST / gRPC / mensageria) | 1,5 |
-| Resiliência e tratamento de falhas | 1,0 |
-| Execução reproduzível (README, container, deploy) | 1,0 |
-| **Sofisticação do modelo de IA** | **não pontua** |
-| **Total** | **5,0** |
+| **gateway** (`gateway/`) | Única porta de entrada: login/JWT, rate limit, validação de entrada, roteamento e proteção das chamadas à inferência |
+| **inferencia** (`inferencia/`) | API REST: enfileira tarefas (`POST /predict`) e consulta resultados; carrega o modelo uma vez |
+| **worker** (`worker/`) | Consome a fila, roda o modelo, grava o resultado; retentativa com *backoff* e dead-letter |
+| **redis** | Fila de tarefas, resultados (com TTL) e dead-letter |
+| **otel-collector** | Recebe os traces (OTLP) dos três serviços |
+| **caddy** (perfil `https`) | Proxy reverso com certificado Let's Encrypt automático |
 
-**Entrega:** no seu repositório do GitHub, **sem apresentação oral**. Grupos livres.
+Os serviços se encontram pelo **nome** na rede do compose (`inferencia`, `redis`,
+`otel-collector`), nunca por IP. Toda configuração vem de **variáveis de ambiente**.
 
----
+**Fluxo:** `POST /login` → token JWT → `POST /predict` (o gateway valida o token, aplica
+o rate limit e chama a inferência; ela enfileira e responde `202 {"id"}`) → o worker
+processa → `GET /resultado/{id}` devolve `status: pronto` com o sentimento.
 
-## Aulas de referência
+## Como executar do zero (um comando)
 
-- **Aula 13** — Nuvem, containers e o primeiro deploy
-- **Aula 14** — Orquestração, serverless e borda
-- **Aula 15** — Observabilidade e rastreamento distribuído
-- **Aula 16** — Segurança, LGPD e revisão para o ENADE
+Pré-requisito: Docker com Docker Compose.
 
----
+```bash
+git clone https://github.com/ensosampaio/sd-2026-2-kit-c3a2.git
+cd sd-2026-2-kit-c3a2
+cp .env.example .env          # opcional: sem .env sobe em modo desenvolvimento
+docker compose up --build
+```
 
-## Dúvidas frequentes
+Teste fim a fim (em outro terminal; precisa de `pip install requests`):
 
-**Preciso saber machine learning?** Não. O modelo já está pronto e você só chama uma função.
+```bash
+python scripts/smoke_test.py
+```
 
-**E se eu não tiver internet no laboratório?** Tudo neste kit funciona offline. O modelo é
-treinado localmente e o cliente de LLM tem modo simulado.
+Ou manualmente, sempre pelo gateway:
 
-**Posso trocar a linguagem?** O kit é em Python porque é o ecossistema usado nas aulas.
-Se quiser usar outra linguagem, converse com o professor antes.
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/login -H "Content-Type: application/json" \
+  -d '{"usuario":"admin","senha":"troque-esta-senha"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-**Posso usar IA para me ajudar a programar?** Sim. Este é um trabalho prático feito fora de
-sala, e usar ferramentas de IA é realista. O que se avalia é o **sistema funcionando** e as
-**decisões de arquitetura** — que você precisa saber explicar.
+curl -X POST http://localhost:8000/predict -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"texto":"servico excelente"}'
+# -> {"id":"..."}
+
+curl http://localhost:8000/resultado/<id> -H "Authorization: Bearer $TOKEN"
+# -> {"sentimento":"positivo","status":"pronto",...}
+```
+
+(Usuário e senha de desenvolvimento são os do `.env.example`: `admin` / `troque-esta-senha`.)
+
+## Segurança
+
+- **JWT** (HS256, expira em `JWT_EXPIRA_MINUTOS`): todas as rotas, exceto `/login` e
+  `/saude`, exigem `Authorization: Bearer`; sem token válido → `401`.
+- **Rate limit** por cliente (janela de 60 s): por usuário nas rotas autenticadas e por IP
+  no `/login` (proteção contra tentativa de senha). Excedeu → `429` + `Retry-After`.
+- **HTTPS** no serviço publicado, via Caddy (Let's Encrypt automático).
+- **Segredos fora do código**, em variáveis de ambiente / `.env` (ignorado pelo Git).
+  Com `AMBIENTE=production`, o gateway **recusa subir** com segredo < 32 caracteres, senha
+  < 12 ou credenciais padrão.
+- Entrada validada (1 a 5000 caracteres, não vazia); o Redis **não** é exposto fora da rede
+  do compose; erros ao cliente não revelam detalhes internos.
+
+## Resiliência
+
+Chamadas do gateway à inferência (`gateway/app.py`):
+
+| Mecanismo | Comportamento | Configuração |
+|---|---|---|
+| **Tempo-limite** | Cada chamada expira → `504` | `TIMEOUT_INFERENCIA_SEGUNDOS=5` |
+| **Retentativa** | `GET` até 3 tentativas com espera progressiva (0,2 s, 0,4 s). `POST` **não** é retentado (duplicaria tarefas) | `TENTATIVAS_GET=3` |
+| **Circuit breaker** | Após 5 falhas seguidas abre e responde `503` na hora; após 20 s testa de novo (meio-aberto) e fecha se voltou | `CB_LIMITE_FALHAS`, `CB_ESPERA_SEGUNDOS` |
+
+No worker: 3 tentativas com *backoff* exponencial e, se esgotar, **dead-letter**
+(`tarefas:dead_letter`) mais `status: falha` consultável. Se o Redis cair, a inferência
+responde `503` e o worker espera e tenta de novo, sem encerrar. Os contêineres têm
+`restart: unless-stopped` e *healthchecks*.
+
+## Observabilidade
+
+Rastreamento distribuído com **OpenTelemetry**, cobrindo **gateway → inferência → fila → worker**
+num único *trace*: o gateway injeta o `traceparent` (W3C) na chamada HTTP, a inferência o
+grava **dentro da mensagem da fila** e o worker o retoma ao consumir. Spans:
+`gateway -> inferencia POST /predict` → `inferencia.enfileirar` → `worker.processar` →
+`worker.inferencia`. Para ver os spans (todos com o mesmo `trace_id`):
+
+```bash
+docker compose logs otel-collector
+```
+
+Cada serviço também registra id, tamanho da entrada e tempo de resposta de cada requisição.
+
+## Conformidade (LGPD)
+
+Projeto acadêmico: **não coletamos nome, e-mail, CPF nem qualquer identificador de
+pessoa** — o acesso é uma credencial técnica única, configurada pelo operador.
+
+| Dado | Finalidade | Retenção |
+|---|---|---|
+| **Texto enviado para análise** (pode, eventualmente, conter dado pessoal digitado pelo usuário) | Executar a classificação de sentimento solicitada | Fica na fila só até ser processado (segundos); o **resultado**, que repete o texto, **expira em 24 h** (`RESULTADO_TTL_SEGUNDOS`) |
+| **Resultado** (sentimento, confiança, tempo) | Entregar a resposta ao solicitante | 24 h, depois é apagado automaticamente |
+| **Dead-letter** (id da tarefa, tipo do erro, nº de tentativas) | Diagnóstico de falhas | Sem o texto do usuário; só metadados técnicos |
+| **IP do cliente** | Rate limit | Só em memória, janela de 60 s; não é gravado |
+| **Usuário e senha da API** | Autenticação | Variáveis de ambiente do servidor; nunca em log nem no repositório |
+| **Logs** (método, rota, status, id da tarefa, tamanho da entrada, tempos) | Operação e observabilidade | Rotação de 3 × 10 MB por serviço |
+
+Os logs **não** registram o texto do usuário, o token JWT nem a senha (verificado nos testes).
+Nenhum dado é compartilhado com terceiros (o modelo roda dentro da própria plataforma).
+Para exclusão antecipada de um resultado: `docker compose exec redis redis-cli DEL resultado:<id>`.
+
+## Relatório de trade-offs
+
+CAP, custo e latência: [docs/RELATORIO-TRADEOFFS.md](docs/RELATORIO-TRADEOFFS.md).
+
+## Estrutura
+
+```
+├── gateway/        # app.py (JWT, rate limit, resiliência), circuit_breaker.py, telemetry.py, Dockerfile
+├── inferencia/     # API REST da inferência, fila Redis, modelo, Dockerfile
+├── worker/         # consumidor da fila, retry + dead-letter, Dockerfile
+├── scripts/        # smoke_test.py (valida local ou o deploy público)
+├── deploy/         # INSTRUCOES.md (VM + HTTPS)
+├── docs/           # RELATORIO-TRADEOFFS.md
+├── docker-compose.yml, Caddyfile, otel-collector-config.yml
+└── .env.example
+```
+
+`fila.py`, `telemetry.py` e `log_requisicoes.py` existem em cópias nos serviços que os
+usam (cada serviço é uma imagem independente); altere as cópias em conjunto.

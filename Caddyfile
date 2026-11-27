@@ -1,0 +1,6 @@
+# Proxy reverso com HTTPS automatico (certificado Let's Encrypt).
+# DOMINIO vem do .env (ex.: minha-plataforma.duckdns.org).
+{$DOMINIO} {
+	encode gzip
+	reverse_proxy gateway:8000
+}

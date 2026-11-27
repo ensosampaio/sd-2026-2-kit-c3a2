@@ -11,27 +11,32 @@ Este e o projeto integrador. Reaproveite o que voce fez em C1.A2 e C2.A2.
       Limitar requisicoes por cliente por minuto. (Aula 8)
 
 - [x] **3. Dockerfile de cada servico**
-      Um Dockerfile por servico. Use `Dockerfile.exemplo` como ponto de partida. (Aula 13)
+      Um Dockerfile por servico: `gateway/`, `inferencia/`, `worker/`. (Aula 13)
 
-- [ ] **4. docker-compose completo**
-      O sistema inteiro deve subir com UM comando. (Aula 14)
+- [x] **4. docker-compose completo**
+      Sobe o sistema inteiro com `docker compose up --build`: gateway, inferencia, worker,
+      Redis e coletor de traces (Caddy no perfil `https`). (Aula 14)
 
 - [ ] **5. Deploy em nuvem (free tier)**
-      Publicar e informar a URL publica no README. (Aula 13)
+      Pronto para publicar (`deploy/INSTRUCOES.md`). FALTA: criar a VM, subir e colocar a
+      URL publica no README.
 
-- [ ] **6. Resiliencia**
-      Tempo-limite, retentativa com espera progressiva e circuit breaker. (Aula 11)
+- [x] **6. Resiliencia**
+      Tempo-limite, retentativa com espera progressiva e circuit breaker no gateway;
+      retentativa + dead-letter no worker. (Aula 11)
 
-- [ ] **7. Observabilidade**
-      Rastreamento distribuido cobrindo gateway -> fila -> worker. (Aula 15)
+- [x] **7. Observabilidade**
+      OpenTelemetry: um unico trace cobre gateway -> inferencia -> fila -> worker. (Aula 15)
 
 - [ ] **8. HTTPS** no servico publicado. (Aula 16)
+      Configurado (Caddy + Let's Encrypt, `docker compose --profile https`). FALTA: ativar
+      no deploy real.
 
-- [ ] **9. Secao de conformidade no README**
-      Quais dados sao tratados, com qual finalidade e por quanto tempo. (LGPD, Aula 16)
+- [x] **9. Secao de conformidade no README**
+      Secao "Conformidade (LGPD)": dados, finalidade e retencao.
 
-- [ ] **10. Relatorio de trade-offs**
-      CAP, custo e latencia do seu sistema.
+- [x] **10. Relatorio de trade-offs**
+      `docs/RELATORIO-TRADEOFFS.md` (CAP, custo e latencia).
 
 ## Extensoes opcionais
 
@@ -43,7 +48,7 @@ Este e o projeto integrador. Reaproveite o que voce fez em C1.A2 e C2.A2.
 
 ## Antes de entregar
 
-- [ ] Clone em OUTRA maquina e rode o comando unico - funciona?
-- [ ] A URL publica esta no ar?
-- [ ] Toda configuracao esta em variavel de ambiente (nada fixo no codigo)?
-- [ ] Os logs estao livres de dados pessoais?
+- [ ] Clone em OUTRA maquina e rode o comando unico (`docker compose up --build`) - funciona?
+- [ ] A URL publica esta no ar e no README? (`BASE_URL=https://... python scripts/smoke_test.py`)
+- [x] Toda configuracao esta em variavel de ambiente (nada fixo no codigo)?
+- [x] Os logs estao livres de dados pessoais? (verificado: sem texto, token ou senha)

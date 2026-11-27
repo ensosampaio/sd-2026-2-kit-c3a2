@@ -1,36 +1,120 @@
+# Plataforma de IA como Servico - sobe tudo com UM comando:
+#   docker compose up --build
+#
+# Em producao, com HTTPS automatico (Caddy):
+#   docker compose --profile https up --build -d
+#
+# Os servicos se enxergam pelo NOME (redis, inferencia, otel-collector),
+# nunca por IP fixo (descoberta de servicos da rede do compose).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   redis:
+    logging: *logging
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    restart: unless-stopped
+    # Sem "ports": o Redis so e acessivel pela rede interna do compose.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      retries: 5
+      timeout: 3s
+      retries: 10
+
+  otel-collector:
+    logging: *logging
+    image: otel/opentelemetry-collector:0.111.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol/config.yaml:ro
 
   inferencia:
+    logging: *logging
     build: ./inferencia
+    restart: unless-stopped
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      RESULTADO_TTL_SEGUNDOS: ${RESULTADO_TTL_SEGUNDOS:-86400}
+      OTEL_SERVICE_NAME: inferencia
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+      AMBIENTE: ${AMBIENTE:-development}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8001/saude', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     depends_on:
       redis: {condition: service_healthy}
+      otel-collector: {condition: service_started}
 
   worker:
+    logging: *logging
     build: ./worker
+    restart: unless-stopped
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      RESULTADO_TTL_SEGUNDOS: ${RESULTADO_TTL_SEGUNDOS:-86400}
+      OTEL_SERVICE_NAME: worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+      AMBIENTE: ${AMBIENTE:-development}
     depends_on:
       redis: {condition: service_healthy}
+      otel-collector: {condition: service_started}
 
   gateway:
+    logging: *logging
     build: ./gateway
-    ports: ["8000:8000"]
+    restart: unless-stopped
+    # Em producao use GATEWAY_BIND=127.0.0.1 (so o Caddy fala com o gateway).
+    ports: ["${GATEWAY_BIND:-0.0.0.0}:8000:8000"]
     environment:
-      - URL_INFERENCIA=http://inferencia:8001
-      - JWT_SEGREDO=${JWT_SEGREDO:-troque-este-segredo}
-      - USUARIO_API=${USUARIO_API:-admin}
-      - SENHA_API=${SENHA_API:-admin}
-      - LIMITE_POR_MINUTO=${LIMITE_POR_MINUTO:-30}
-    depends_on: [inferencia]
+      URL_INFERENCIA: http://inferencia:8001
+      AMBIENTE: ${AMBIENTE:-development}
+      JWT_SEGREDO: ${JWT_SEGREDO:-troque-este-segredo}
+      JWT_EXPIRA_MINUTOS: ${JWT_EXPIRA_MINUTOS:-30}
+      USUARIO_API: ${USUARIO_API:-admin}
+      SENHA_API: ${SENHA_API:-admin}
+      LIMITE_POR_MINUTO: ${LIMITE_POR_MINUTO:-30}
+      CONFIAR_PROXY: ${CONFIAR_PROXY:-false}
+      TIMEOUT_INFERENCIA_SEGUNDOS: ${TIMEOUT_INFERENCIA_SEGUNDOS:-5}
+      TENTATIVAS_GET: ${TENTATIVAS_GET:-3}
+      CB_LIMITE_FALHAS: ${CB_LIMITE_FALHAS:-5}
+      CB_ESPERA_SEGUNDOS: ${CB_ESPERA_SEGUNDOS:-20}
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-otlp}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/saude', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      inferencia: {condition: service_healthy}
+      otel-collector: {condition: service_started}
 
-# Observe: os servicos se referenciam pelo NOME (inferencia, redis),
-# nunca por IP fixo. Isso e descoberta de servicos. (Aula 14)
+  # HTTPS (Let's Encrypt automatico). So sobe com --profile https.
+  caddy:
+    logging: *logging
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMINIO: ${DOMINIO:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      gateway: {condition: service_healthy}
+
+volumes:
+  caddy_data:
