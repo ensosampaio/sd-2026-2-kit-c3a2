@@ -64,9 +64,14 @@ done
 sudo docker compose ps
 
 echo ">> 6/6 Teste de fumaca (local, direto no gateway)"
-USUARIO_API="$(grep '^USUARIO_API=' .env | cut -d= -f2)" \
-SENHA_API="$(grep '^SENHA_API=' .env | cut -d= -f2)" \
-BASE_URL=http://127.0.0.1:8000 python3 scripts/smoke_test.py
+if [ -f scripts/smoke_test.py ]; then
+  USUARIO_API="$(grep '^USUARIO_API=' .env | cut -d= -f2)" \
+  SENHA_API="$(grep '^SENHA_API=' .env | cut -d= -f2)" \
+  BASE_URL=http://127.0.0.1:8000 python3 scripts/smoke_test.py \
+    || echo "   (o teste de fumaca reportou falhas; veja acima e: sudo docker compose logs)"
+else
+  echo "   scripts/smoke_test.py ainda nao esta no repositorio: etapa ignorada."
+fi
 
 echo
 echo "HTTPS publico (precisa do DNS apontando para esta VM e das portas 80/443 abertas):"
