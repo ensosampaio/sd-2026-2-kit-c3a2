@@ -18,8 +18,9 @@ Este e o projeto integrador. Reaproveite o que voce fez em C1.A2 e C2.A2.
       Redis e coletor de traces (Caddy no perfil `https`). (Aula 14)
 
 - [ ] **5. Deploy em nuvem (free tier)**
-      Pronto para publicar (`deploy/INSTRUCOES.md`). FALTA: criar a VM, subir e colocar a
-      URL publica no README.
+      Pronto para publicar (`deploy/INSTRUCOES.md` e `deploy/vm_setup.sh`). Tentamos a Oracle
+      Cloud (Free Tier, Sao Paulo), mas a VM nao pode ser criada: "Out of capacity" nos dois
+      shapes gratuitos. Deploy NAO concluido (ver README).
 
 - [x] **6. Resiliencia**
       Tempo-limite, retentativa com espera progressiva e circuit breaker no gateway;
@@ -29,8 +30,8 @@ Este e o projeto integrador. Reaproveite o que voce fez em C1.A2 e C2.A2.
       OpenTelemetry: um unico trace cobre gateway -> inferencia -> fila -> worker. (Aula 15)
 
 - [ ] **8. HTTPS** no servico publicado. (Aula 16)
-      Configurado (Caddy + Let's Encrypt, `docker compose --profile https`). FALTA: ativar
-      no deploy real.
+      Configurado (Caddy + Let's Encrypt, `docker compose --profile https`); depende do
+      deploy publicar a plataforma, que nao foi concluido.
 
 - [x] **9. Secao de conformidade no README**
       Secao "Conformidade (LGPD)": dados, finalidade e retencao.

@@ -12,7 +12,16 @@ Sistemas Distribuídos e Computação em Nuvem · FAESA · 2026/2 · Turma 8HC1
 
 ## Deploy público
 
-**URL pública (HTTPS):** `PREENCHER-APOS-O-DEPLOY` · passo a passo em [deploy/INSTRUCOES.md](deploy/INSTRUCOES.md)
+**Status: o deploy público não foi concluído.** Tentamos publicar na **Oracle Cloud
+(Free Tier, região São Paulo)**, mas a criação da VM falhou por falta de capacidade do
+próprio free tier: a Oracle respondeu *"Out of capacity"* tanto para o shape
+`VM.Standard.E2.1.Micro` quanto para o `VM.Standard.A1.Flex` (ambos *Always Free*) e, nas
+tentativas seguintes, *"Too many requests for the tenant"*.
+
+Deixamos tudo pronto para publicar assim que houver uma VM: HTTPS automático via Caddy
+(`docker compose --profile https`), o script `deploy/vm_setup.sh` (um comando) e o passo a
+passo em [deploy/INSTRUCOES.md](deploy/INSTRUCOES.md). A plataforma completa sobe
+localmente com `docker compose up --build` (veja "Como executar do zero").
 
 ## O que é
 
@@ -101,7 +110,7 @@ curl http://localhost:8000/resultado/<id> -H "Authorization: Bearer $TOKEN"
   `/saude`, exigem `Authorization: Bearer`; sem token válido → `401`.
 - **Rate limit** por cliente (janela de 60 s): por usuário nas rotas autenticadas e por IP
   no `/login` (proteção contra tentativa de senha). Excedeu → `429` + `Retry-After`.
-- **HTTPS** no serviço publicado, via Caddy (Let's Encrypt automático).
+- **HTTPS** configurado via Caddy (Let's Encrypt automático, `docker compose --profile https`); fica ativo quando a plataforma é publicada numa VM (ver "Deploy público").
 - **Segredos fora do código**, em variáveis de ambiente / `.env` (ignorado pelo Git).
   Com `AMBIENTE=production`, o gateway **recusa subir** com segredo < 32 caracteres, senha
   < 12 ou credenciais padrão.
